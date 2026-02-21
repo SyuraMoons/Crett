@@ -151,7 +151,7 @@ function getClient(): OpenAI {
     if (!apiKey) throw new Error("ZAI_API_KEY not set")
     client = new OpenAI({
       apiKey,
-      baseURL: "https://api.z.ai/api/paas/v4",
+      baseURL: "https://api.z.ai/api/coding/paas/v4",
     })
   }
   return client
