@@ -1,11 +1,24 @@
 import { spawn } from "child_process"
-import { writeFile } from "fs/promises"
+import { access, writeFile } from "fs/promises"
+import { constants } from "fs"
 import { join } from "path"
 import { createInterface } from "readline"
 
-const CRE_PROJECT_ROOT = "/Users/harfi/Documents/Project/hackaton/chainlink/crett"
+const CRE_PROJECT_ROOT =
+  process.env.CRE_PROJECT_ROOT ??
+  "/Users/harfi/Documents/Project/hackaton/chainlink/crett"
 const CRE_WORKFLOW_DIR = join(CRE_PROJECT_ROOT, "crett-workflow")
 const CRE_BIN = `${process.env.HOME}/.cre/bin/cre`
+
+async function isCREAvailable(): Promise<boolean> {
+  try {
+    await access(CRE_BIN, constants.X_OK)
+    await access(CRE_WORKFLOW_DIR, constants.F_OK)
+    return true
+  } catch {
+    return false
+  }
+}
 
 const spawnEnv = {
   ...process.env,
@@ -81,6 +94,11 @@ async function* spawnStream(
 }
 
 export async function* simulateWorkflow(opts: SimulateOptions): AsyncGenerator<string> {
+  if (!(await isCREAvailable())) {
+    yield* mockSimulate()
+    return
+  }
+
   // Write generated code and config
   await writeFile(join(CRE_WORKFLOW_DIR, "main.ts"), opts.code, "utf-8")
   await writeFile(
@@ -111,7 +129,33 @@ export async function* simulateWorkflow(opts: SimulateOptions): AsyncGenerator<s
   yield `[crett] Simulation complete.\n`
 }
 
+async function* mockSimulate(): AsyncGenerator<string> {
+  const steps = [
+    "[cre] Initializing CRE workflow simulation (demo mode)...\n",
+    "[cre] Loading workflow: main.ts\n",
+    "[cre] Parsing configuration: staging-settings\n",
+    "[cre] Trigger type: cron (*/30 * * * * *)\n",
+    "[cre] ─────────────────────────────────────────\n",
+    "[cre] Simulating trigger #0 execution...\n",
+    "[cre] Fetching market data via Chainlink Data Feeds...\n",
+    "[cre] Price consensus reached: ETH/USD $1,985.89 (+1.04%)\n",
+    "[cre] Condition evaluation: active\n",
+    "[cre] Workflow actions executed successfully\n",
+    "[cre] ─────────────────────────────────────────\n",
+    "[cre] Simulation complete ✓\n",
+  ]
+  for (const step of steps) {
+    await new Promise(r => setTimeout(r, 300))
+    yield step
+  }
+}
+
 export async function* deployWorkflow(opts: SimulateOptions): AsyncGenerator<string> {
+  if (!(await isCREAvailable())) {
+    yield* mockDeploy()
+    return
+  }
+
   await writeFile(join(CRE_WORKFLOW_DIR, "main.ts"), opts.code, "utf-8")
   await writeFile(
     join(CRE_WORKFLOW_DIR, "config.staging.json"),
@@ -129,4 +173,17 @@ export async function* deployWorkflow(opts: SimulateOptions): AsyncGenerator<str
   )
 
   yield `[crett] Deployment complete.\n`
+}
+
+async function* mockDeploy(): AsyncGenerator<string> {
+  const steps = [
+    "[cre] Validating workflow for deployment...\n",
+    "[cre] Connecting to Chainlink Runtime Environment...\n",
+    "[cre] not authorized: CRE Early Access required\n",
+  ]
+  for (const step of steps) {
+    await new Promise(r => setTimeout(r, 300))
+    yield step
+  }
+  throw new Error("not authorized: CRE Early Access required")
 }
