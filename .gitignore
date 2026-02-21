@@ -1,0 +1,41 @@
+# IDEs and OS
+.DS_Store
+.vscode/
+.idea/
+
+# Environment Variables
+.env
+.env.local
+.env.*.local
+backend/.env
+fe/.env
+crett/.env
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Next.js (fe)
+fe/.next/
+fe/out/
+
+# TypeScript & Builds
+dist/
+build/
+*.tsbuildinfo
+
+# Foundry (contract)
+contract/cache/
+contract/out/
+contract/broadcast/
+contract/reports/
+
+# CRE Workflow (crett)
+crett/crett-workflow/node_modules/
+crett/crett-workflow/bun.lockb
+crett/crett-workflow/bun.lock
+crett/crett-workflow/tmp.*
+crett/crett-workflow/dist/
