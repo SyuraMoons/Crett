@@ -151,7 +151,7 @@ function getClient(): OpenAI {
     if (!apiKey) throw new Error("ZAI_API_KEY not set")
     client = new OpenAI({
       apiKey,
-      baseURL: "https://api.z.ai/v1",
+      baseURL: "https://api.z.ai/api/paas/v4",
     })
   }
   return client
@@ -160,7 +160,7 @@ function getClient(): OpenAI {
 export async function generateWorkflow(userPrompt: string): Promise<string> {
   const ai = getClient()
   const resp = await ai.chat.completions.create({
-    model: "glm-4.7",
+    model: "zai/glm-4.7",
     messages: [
       { role: "system", content: buildSystemPrompt() },
       {
@@ -183,7 +183,7 @@ export async function generateWorkflow(userPrompt: string): Promise<string> {
 export async function explainWorkflow(code: string): Promise<string> {
   const ai = getClient()
   const resp = await ai.chat.completions.create({
-    model: "glm-4.7",
+    model: "zai/glm-4.7",
     messages: [
       {
         role: "user",
