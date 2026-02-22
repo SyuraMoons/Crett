@@ -115,6 +115,7 @@ runtime.log(\`Tx: \${bytesToHex(writeResult.txHash || new Uint8Array(32))}\`)
 5. Return ONLY valid TypeScript code — NO markdown fences, NO explanations
 6. The file must end with the main() call pattern shown below
 7. Use Buffer.from(...).toString("base64") for HTTP body encoding
+8. NEVER copy or reproduce the example templates verbatim. Always generate FRESH, UNIQUE code tailored exactly to the user's specific prompt — their asset, threshold values, schedule, contract addresses, and logic.
 
 ## Entry Point Pattern (always end file with this)
 \`\`\`typescript
@@ -165,7 +166,11 @@ export async function generateWorkflow(userPrompt: string): Promise<string> {
       { role: "system", content: buildSystemPrompt() },
       {
         role: "user",
-        content: `Generate a CRE TypeScript workflow for: ${userPrompt}\n\nReturn ONLY valid TypeScript code. No markdown, no explanations.`,
+        content: `Generate a NEW, UNIQUE CRE TypeScript workflow that specifically implements: ${userPrompt}
+
+Use the correct SDK patterns from the system prompt. Do NOT copy any example template — write fresh code with the exact asset, values, thresholds, schedule, and logic the user described.
+
+Return ONLY valid TypeScript code. No markdown, no explanations.`,
       },
     ],
   })
