@@ -6,7 +6,7 @@ const FEATURES = [
   {
     icon: Brain,
     title: "AI Workflow Generation",
-    description: "Powered by Google Gemini 2.0 Flash. Describe your automation in plain English and get syntactically valid CRE TypeScript instantly.",
+    description: "Powered by Z.AI GLM-4.7. Describe your automation in plain English and get syntactically valid CRE TypeScript instantly.",
     color: "text-purple-400",
     bg: "bg-purple-500/10 border-purple-500/20",
   },
