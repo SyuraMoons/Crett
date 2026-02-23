@@ -185,6 +185,32 @@ Return ONLY valid TypeScript code. No markdown, no explanations.`,
   return code
 }
 
+export async function* generateWorkflowStream(
+  userPrompt: string
+): AsyncGenerator<string> {
+  const ai = getClient()
+  const stream = await ai.chat.completions.create({
+    model: "glm-4.7",
+    messages: [
+      { role: "system", content: buildSystemPrompt() },
+      {
+        role: "user",
+        content: `Generate a NEW, UNIQUE CRE TypeScript workflow that specifically implements: ${userPrompt}
+
+Use the correct SDK patterns from the system prompt. Do NOT copy any example template — write fresh code with the exact asset, values, thresholds, schedule, and logic the user described.
+
+Return ONLY valid TypeScript code. No markdown, no explanations.`,
+      },
+    ],
+    stream: true,
+  })
+
+  for await (const chunk of stream) {
+    const delta = chunk.choices[0]?.delta?.content ?? ""
+    if (delta) yield delta
+  }
+}
+
 export async function explainWorkflow(code: string): Promise<string> {
   const ai = getClient()
   const resp = await ai.chat.completions.create({
