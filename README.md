@@ -16,7 +16,7 @@ chainlink/                        ← ROOT (git repo + concurrently)
 │
 ├── backend/                      ← Express API server (port 3001)
 │   ├── package.json
-│   ├── .env                      ← GEMINI_API_KEY, COINGECKO_API_KEY, PORT
+│   ├── .env                      ← ZAI_API_KEY, COINGECKO_API_KEY, PORT
 │   ├── node_modules/
 │   └── src/index.ts
 │
@@ -35,7 +35,7 @@ chainlink/                        ← ROOT (git repo + concurrently)
 This is a monorepo. Each package manages its own deps independently:
 - Root `node_modules` — only `concurrently` (to run both servers at once)
 - `fe/node_modules` — Next.js, React, wagmi, rainbowkit, etc.
-- `backend/node_modules` — Express, Gemini SDK, dotenv, etc.
+- `backend/node_modules` — Express, Z.ai SDK, dotenv, etc.
 
 ## Setup
 
@@ -64,7 +64,7 @@ cd backend && npm run dev   # → http://localhost:3001
 
 ### `fe/.env`
 ```
-GEMINI_API_KEY=...
+ZAI_API_KEY=...
 COINGECKO_API_KEY=...
 NEXT_PUBLIC_WALLETCONNECT_ID=...
 NEXT_PUBLIC_BACKEND_URL=http://localhost:3001
@@ -72,7 +72,7 @@ NEXT_PUBLIC_BACKEND_URL=http://localhost:3001
 
 ### `backend/.env`
 ```
-GEMINI_API_KEY=...
+ZAI_API_KEY=...
 COINGECKO_API_KEY=...
 PORT=3001
 ```
