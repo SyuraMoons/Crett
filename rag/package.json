@@ -1,0 +1,34 @@
+{
+  "name": "crett-rag",
+  "version": "1.0.0",
+  "description": "RAG microservice for Crett - CRE docs ingestion & retrieval",
+  "private": true,
+  "scripts": {
+    "scrape": "ts-node scripts/scrape.ts",
+    "chunk": "ts-node scripts/chunk.ts",
+    "ingest": "ts-node scripts/ingest.ts",
+    "pipeline": "ts-node scripts/scrape.ts && ts-node scripts/chunk.ts && ts-node scripts/ingest.ts",
+    "dev": "nodemon src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.49.1",
+    "axios": "^1.7.9",
+    "cheerio": "^1.0.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "openai": "^4.86.2",
+    "p-limit": "^3.1.0"
+  },
+  "devDependencies": {
+    "@types/cheerio": "^0.22.35",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.13.5",
+    "nodemon": "^3.1.9",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.8.2"
+  }
+}
