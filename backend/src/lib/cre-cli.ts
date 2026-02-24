@@ -100,10 +100,15 @@ export async function* simulateWorkflow(opts: SimulateOptions): AsyncGenerator<s
   }
 
   // Write generated code and config
+  const enrichedConfig = {
+    schedule: "*/30 * * * * *",
+    coinGeckoApiKey: process.env.COINGECKO_API_KEY ?? "",
+    ...opts.config,
+  }
   await writeFile(join(CRE_WORKFLOW_DIR, "main.ts"), opts.code, "utf-8")
   await writeFile(
     join(CRE_WORKFLOW_DIR, "config.staging.json"),
-    JSON.stringify(opts.config, null, 2),
+    JSON.stringify(enrichedConfig, null, 2),
     "utf-8"
   )
 
@@ -156,10 +161,15 @@ export async function* deployWorkflow(opts: SimulateOptions): AsyncGenerator<str
     return
   }
 
+  const enrichedConfig = {
+    schedule: "*/30 * * * * *",
+    coinGeckoApiKey: process.env.COINGECKO_API_KEY ?? "",
+    ...opts.config,
+  }
   await writeFile(join(CRE_WORKFLOW_DIR, "main.ts"), opts.code, "utf-8")
   await writeFile(
     join(CRE_WORKFLOW_DIR, "config.staging.json"),
-    JSON.stringify(opts.config, null, 2),
+    JSON.stringify(enrichedConfig, null, 2),
     "utf-8"
   )
 

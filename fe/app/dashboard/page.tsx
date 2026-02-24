@@ -61,26 +61,58 @@ export default function DashboardPage() {
   const handleGenerate = async () => {
     if (!prompt.trim()) return
     setGenerating(true)
+    setCode("")
     setLogs([])
     setSimulateSuccess(null)
+
     try {
       const res = await fetch(`${BACKEND_URL}/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prompt }),
       })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || "Generation failed")
 
-      setCode(data.code)
-      const entry: WorkflowEntry = {
-        id: uuidv4(),
-        prompt,
-        code: data.code,
-        createdAt: new Date(),
+      if (!res.ok || !res.body) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.error || "Generation failed")
       }
-      saveHistory(entry)
-      toast.success("Workflow generated!")
+
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ""
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+
+        const lines = buffer.split("\n")
+        buffer = lines.pop() || ""
+
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue
+          try {
+            const event = JSON.parse(line.slice(6))
+            if (event.type === "chunk") {
+              setCode((prev) => prev + event.code)
+            } else if (event.type === "done" && event.success) {
+              setCode(event.code)
+              const entry: WorkflowEntry = {
+                id: uuidv4(),
+                prompt,
+                code: event.code,
+                createdAt: new Date(),
+              }
+              saveHistory(entry)
+              toast.success("Workflow generated!")
+            } else if (event.type === "error") {
+              throw new Error(event.message)
+            }
+          } catch (parseErr) {
+            // ignore JSON parse errors on partial lines
+          }
+        }
+      }
     } catch (err) {
       toast.error(String(err))
     } finally {
