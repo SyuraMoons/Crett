@@ -1,22 +1,20 @@
 import {
   CronCapability, EVMClient, HTTPClient,
-  handler, Runner, getNetwork, encodeCallMsg, bytesToHex, hexToBase64,
-  prepareReportRequest, LAST_FINALIZED_BLOCK_NUMBER, LATEST_BLOCK_NUMBER,
+  handler, Runner, getNetwork, encodeCallMsg, bytesToHex,
   consensusMedianAggregation, consensusIdenticalAggregation,
-  ok, json, text, getHeader,
-  type Runtime, type NodeRuntime, type HTTPSendRequester, type CronPayload
+  ok, json, LAST_FINALIZED_BLOCK_NUMBER,
+  type Runtime, type HTTPSendRequester
 } from "@chainlink/cre-sdk"
-import {
-  encodeFunctionData, decodeFunctionResult, parseAbi,
-  zeroAddress, type Address, type Hex
-} from "viem"
+import { encodeFunctionData, decodeFunctionResult, parseAbi, zeroAddress, type Address } from "viem"
 import { z } from "zod"
 
 const configSchema = z.object({
   schedule: z.string(),
   coinGeckoApiKey: z.string(),
-  webhookUrl: z.string(),
-  ethUsdFeedAddress: z.string(),
+  ethUsdFeedAddress: z.string().default("0x4aDC67696bA383F43DD60A9e78F2C97Fbbfc7cb1"),
+  linkUsdFeedAddress: z.string().default("0xb113F5A928BCfF189C998ab20d753a47F9dE5A61"),
+  divergenceThreshold: z.number().default(1.0),
+  webhookUrl: z.string().default(""),
 })
 type Config = z.infer<typeof configSchema>
 
@@ -24,17 +22,16 @@ const AGGREGATOR_V3_ABI = parseAbi([
   "function latestRoundData() external view returns (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound)"
 ])
 
-const fetchEthPrice = (sendRequester: HTTPSendRequester, url: string, apiKey: string): number => {
+const fetchPrices = (sendRequester: HTTPSendRequester, url: string, apiKey: string): { ethereum: { usd: number }; chainlink: { usd: number } } => {
   const response = sendRequester.sendRequest({
-    url,
+    url, method: "GET",
     headers: { "x-cg-pro-api-key": apiKey },
   }).result()
   if (!ok(response)) throw new Error(`CoinGecko request failed: ${response.statusCode}`)
-  const data = json(response) as Array<{ current_price: { usd: number } }>
-  return data[0].current_price.usd
+  return json(response) as { ethereum: { usd: number }; chainlink: { usd: number } }
 }
 
-const postAlert = (sendRequester: HTTPSendRequester, body: string, url: string): string => {
+const postWebhook = (sendRequester: HTTPSendRequester, body: string, url: string): string => {
   const encoded = Buffer.from(new TextEncoder().encode(body)).toString("base64")
   const response = sendRequester.sendRequest({
     url, method: "POST",
@@ -44,69 +41,66 @@ const postAlert = (sendRequester: HTTPSendRequester, body: string, url: string):
   return ok(response) ? "sent" : "failed"
 }
 
-const onCronTrigger = (runtime: Runtime<Config>): string => {
-  const { coinGeckoApiKey, webhookUrl, ethUsdFeedAddress } = runtime.config
-  const network = getNetwork({ chainFamily: "evm", chainSelectorName: "ethereum-testnet-sepolia-base-1", isTestnet: true })
-  const evmClient = new EVMClient(network.chainSelector.selector)
-  const httpClient = new HTTPClient()
-
-  runtime.log("Starting ETH price divergence check...")
-
-  // 1. Fetch price from CoinGecko
-  const cgPrice = httpClient
-    .sendRequest(runtime, fetchEthPrice, consensusMedianAggregation<number>())(
-      "https://pro-api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=ethereum",
-      coinGeckoApiKey
-    )
-    .result()
-  
-  runtime.log(`CoinGecko ETH Price: $${cgPrice}`)
-
-  // 2. Fetch price from Chainlink Feed on Base Sepolia
-  const callData = encodeFunctionData({
-    abi: AGGREGATOR_V3_ABI,
-    functionName: "latestRoundData",
-    args: [],
-  })
-
+function readFeedPrice(evmClient: EVMClient, runtime: Runtime<Config>, feedAddress: string): number {
+  const callData = encodeFunctionData({ abi: AGGREGATOR_V3_ABI, functionName: "latestRoundData", args: [] })
   const result = evmClient.callContract(runtime, {
-    call: encodeCallMsg({ from: zeroAddress, to: ethUsdFeedAddress as Address, data: callData }),
+    call: encodeCallMsg({ from: zeroAddress, to: feedAddress as Address, data: callData }),
     blockNumber: LAST_FINALIZED_BLOCK_NUMBER,
   }).result()
-
   const [, answer] = decodeFunctionResult({
     abi: AGGREGATOR_V3_ABI,
     functionName: "latestRoundData",
     data: bytesToHex(result.data),
   }) as [bigint, bigint, bigint, bigint, bigint]
+  return Number(answer) / 1e8
+}
 
-  // Chainlink USD feeds usually have 8 decimals
-  const clPrice = Number(answer) / 1e8
-  runtime.log(`Chainlink ETH Price: $${clPrice}`)
+const onCronTrigger = (runtime: Runtime<Config>): string => {
+  const { coinGeckoApiKey, ethUsdFeedAddress, linkUsdFeedAddress, webhookUrl, divergenceThreshold } = runtime.config
+  const network = getNetwork({ chainFamily: "evm", chainSelectorName: "ethereum-testnet-sepolia-base-1", isTestnet: true })
+  const evmClient = new EVMClient(network.chainSelector.selector)
+  const httpClient = new HTTPClient()
 
-  // 3. Compare and check divergence
-  const divergence = Math.abs((cgPrice - clPrice) / clPrice) * 100
-  runtime.log(`Divergence: ${divergence.toFixed(4)}%`)
+  runtime.log("Crett CRE Feed: fetching ETH + LINK prices...")
 
-  const THRESHOLD_PERCENT = 1.0
-  if (divergence > THRESHOLD_PERCENT) {
-    const alertPayload = JSON.stringify({
-      alert: "ETH Price Divergence Alert",
-      coingecko_price: cgPrice,
-      chainlink_price: clPrice,
-      divergence_percent: divergence.toFixed(2),
-      threshold: THRESHOLD_PERCENT,
-      network: "Base Sepolia",
+  // 1. Fetch ETH + LINK prices from CoinGecko
+  const cgData = httpClient
+    .sendRequest(runtime, fetchPrices, consensusMedianAggregation<{ ethereum: { usd: number }; chainlink: { usd: number } }>())(
+      "https://pro-api.coingecko.com/api/v3/simple/price?ids=ethereum,chainlink&vs_currencies=usd",
+      coinGeckoApiKey
+    ).result()
+
+  const cgEth = cgData.ethereum.usd
+  const cgLink = cgData.chainlink.usd
+  runtime.log(`CoinGecko ETH: $${cgEth}`)
+  runtime.log(`CoinGecko LINK: $${cgLink}`)
+
+  // 2. Fetch from Chainlink on-chain feeds (Base Sepolia)
+  const clEth = readFeedPrice(evmClient, runtime, ethUsdFeedAddress)
+  const clLink = readFeedPrice(evmClient, runtime, linkUsdFeedAddress)
+  runtime.log(`Chainlink ETH: $${clEth}`)
+  runtime.log(`Chainlink LINK: $${clLink}`)
+
+  // 3. Compute divergence
+  const ethDivergence = Math.abs((cgEth - clEth) / clEth) * 100
+  const linkDivergence = Math.abs((cgLink - clLink) / clLink) * 100
+  runtime.log(`ETH Divergence: ${ethDivergence.toFixed(4)}%`)
+  runtime.log(`LINK Divergence: ${linkDivergence.toFixed(4)}%`)
+
+  // 4. Send webhook unconditionally (reports live data every run)
+  if (webhookUrl) {
+    const payload = JSON.stringify({
+      eth: { coingecko: cgEth, chainlink: clEth, divergence: ethDivergence.toFixed(4) },
+      link: { coingecko: cgLink, chainlink: clLink, divergence: linkDivergence.toFixed(4) },
+      alert: ethDivergence > divergenceThreshold || linkDivergence > divergenceThreshold,
     })
-
     const status = httpClient
-      .sendRequest(runtime, postAlert, consensusIdenticalAggregation<string>())(alertPayload, webhookUrl)
+      .sendRequest(runtime, postWebhook, consensusIdenticalAggregation<string>())(payload, webhookUrl)
       .result()
-    
-    runtime.log(`Alert triggered! Webhook status: ${status}`)
+    runtime.log(`Webhook: ${status}`)
   }
 
-  return `divergence=${divergence.toFixed(2)}`
+  return `eth=${cgEth},link=${cgLink}`
 }
 
 const initWorkflow = (config: Config) => {
