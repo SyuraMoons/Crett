@@ -11,14 +11,15 @@ import { z } from "zod"
 const configSchema = z.object({
   schedule: z.string(),
   coinGeckoApiKey: z.string(),
-  webhookUrl: z.string(),
-  priceThreshold: z.number(),
+  priceThreshold: z.number().default(2000),
+  webhookUrl: z.string().default(""),
 })
 type Config = z.infer<typeof configSchema>
 
 const fetchEthPrice = (sendRequester: HTTPSendRequester, url: string, apiKey: string): number => {
   const response = sendRequester.sendRequest({
     url,
+    method: "GET",
     headers: { "x-cg-pro-api-key": apiKey },
   }).result()
   if (!ok(response)) throw new Error(\`CoinGecko failed: \${response.statusCode}\`)
@@ -50,7 +51,7 @@ const onCronTrigger = (runtime: Runtime<Config>): string => {
 
   runtime.log(\`ETH price: $\${price}\`)
 
-  if (price < priceThreshold) {
+  if (price < priceThreshold && webhookUrl) {
     const payload = JSON.stringify({ alert: "ETH price below threshold", price, threshold: priceThreshold })
     const status = httpClient
       .sendRequest(runtime, postWebhook, consensusIdenticalAggregation<string>())(payload, webhookUrl)
@@ -73,9 +74,9 @@ export async function main() {
 main()
 `.trim()
 
-export const TREASURY_MONITOR_TEMPLATE = `
+export const CHAINLINK_FEED_MONITOR_TEMPLATE = `
 import {
-  CronCapability, HTTPClient, EVMClient,
+  CronCapability, EVMClient, HTTPClient,
   handler, Runner, getNetwork, encodeCallMsg, bytesToHex,
   consensusMedianAggregation, consensusIdenticalAggregation,
   ok, json, LAST_FINALIZED_BLOCK_NUMBER,
@@ -87,23 +88,24 @@ import { z } from "zod"
 const configSchema = z.object({
   schedule: z.string(),
   coinGeckoApiKey: z.string(),
-  slackWebhookUrl: z.string(),
-  treasuryAddress: z.string(),
-  balanceThresholdUsd: z.number(),
+  linkUsdFeedAddress: z.string().default("0xb113F5A928BCfF189C998ab20d753a47F9dE5A61"),
+  divergenceThreshold: z.number().default(2.0),
+  webhookUrl: z.string().default(""),
 })
 type Config = z.infer<typeof configSchema>
 
-const TREASURY_ABI = parseAbi(["function getBalance(address token) view returns (uint256)"])
-const USDC_ADDRESS = "0x036CbD53842c5426634e7929541eC2318f3dCF7e" // Base Sepolia USDC
+const AGGREGATOR_V3_ABI = parseAbi([
+  "function latestRoundData() external view returns (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound)"
+])
 
-const fetchUsdcPrice = (sendRequester: HTTPSendRequester, url: string, apiKey: string): number => {
-  const response = sendRequester.sendRequest({ url, headers: { "x-cg-pro-api-key": apiKey } }).result()
-  if (!ok(response)) return 1.0
-  const data = json(response) as { usd_coin: { usd: number } }
-  return data.usd_coin?.usd ?? 1.0
+const fetchLinkPrice = (sendRequester: HTTPSendRequester, url: string, apiKey: string): number => {
+  const response = sendRequester.sendRequest({ url, method: "GET", headers: { "x-cg-pro-api-key": apiKey } }).result()
+  if (!ok(response)) throw new Error(\`CoinGecko request failed: \${response.statusCode}\`)
+  const data = json(response) as { chainlink: { usd: number } }
+  return data.chainlink.usd
 }
 
-const postSlack = (sendRequester: HTTPSendRequester, body: string, url: string): string => {
+const postAlert = (sendRequester: HTTPSendRequester, body: string, url: string): string => {
   const encoded = Buffer.from(new TextEncoder().encode(body)).toString("base64")
   const response = sendRequester.sendRequest({
     url, method: "POST",
@@ -114,43 +116,64 @@ const postSlack = (sendRequester: HTTPSendRequester, body: string, url: string):
 }
 
 const onCronTrigger = (runtime: Runtime<Config>): string => {
-  const { coinGeckoApiKey, slackWebhookUrl, treasuryAddress, balanceThresholdUsd } = runtime.config
+  const { coinGeckoApiKey, webhookUrl, linkUsdFeedAddress, divergenceThreshold } = runtime.config
   const network = getNetwork({ chainFamily: "evm", chainSelectorName: "ethereum-testnet-sepolia-base-1", isTestnet: true })
   const evmClient = new EVMClient(network.chainSelector.selector)
   const httpClient = new HTTPClient()
 
-  // Read treasury USDC balance
+  runtime.log("Starting LINK price cross-validation...")
+
+  // 1. Fetch LINK price from CoinGecko
+  const cgPrice = httpClient
+    .sendRequest(runtime, fetchLinkPrice, consensusMedianAggregation<number>())(
+      "https://pro-api.coingecko.com/api/v3/simple/price?ids=chainlink&vs_currencies=usd",
+      coinGeckoApiKey
+    )
+    .result()
+  runtime.log(\`CoinGecko LINK Price: $\${cgPrice}\`)
+
+  // 2. Fetch LINK/USD from Chainlink feed on Base Sepolia
   const callData = encodeFunctionData({
-    abi: TREASURY_ABI,
-    functionName: "getBalance",
-    args: [USDC_ADDRESS as Address],
+    abi: AGGREGATOR_V3_ABI,
+    functionName: "latestRoundData",
+    args: [],
   })
   const result = evmClient.callContract(runtime, {
-    call: encodeCallMsg({ from: zeroAddress, to: treasuryAddress as Address, data: callData }),
+    call: encodeCallMsg({ from: zeroAddress, to: linkUsdFeedAddress as Address, data: callData }),
     blockNumber: LAST_FINALIZED_BLOCK_NUMBER,
   }).result()
-  const [balanceRaw] = decodeFunctionResult({ abi: TREASURY_ABI, functionName: "getBalance", data: bytesToHex(result.data) }) as [bigint]
-  const balanceUsdc = Number(balanceRaw) / 1e6
+  const [, answer] = decodeFunctionResult({
+    abi: AGGREGATOR_V3_ABI,
+    functionName: "latestRoundData",
+    data: bytesToHex(result.data),
+  }) as [bigint, bigint, bigint, bigint, bigint]
 
-  // Get USDC/USD price
-  const usdcPrice = httpClient
-    .sendRequest(runtime, fetchUsdcPrice, consensusMedianAggregation<number>())(
-      "https://pro-api.coingecko.com/api/v3/simple/price?ids=usd-coin&vs_currencies=usd",
-      coinGeckoApiKey
-    ).result()
+  const clPrice = Number(answer) / 1e8
+  runtime.log(\`Chainlink LINK/USD Feed: $\${clPrice}\`)
 
-  const balanceUsd = balanceUsdc * usdcPrice
-  runtime.log(\`Treasury balance: \${balanceUsdc.toFixed(2)} USDC = $\${balanceUsd.toFixed(2)}\`)
+  // 3. Cross-validate both sources
+  const divergence = Math.abs((cgPrice - clPrice) / clPrice) * 100
+  runtime.log(\`Divergence: \${divergence.toFixed(4)}%\`)
 
-  if (balanceUsd < balanceThresholdUsd) {
-    const msg = JSON.stringify({ text: \`⚠️ Treasury alert: $\${balanceUsd.toFixed(2)} USD (below $\${balanceThresholdUsd} threshold)\` })
-    const status = httpClient
-      .sendRequest(runtime, postSlack, consensusIdenticalAggregation<string>())(msg, slackWebhookUrl)
-      .result()
-    runtime.log(\`Slack alert: \${status}\`)
+  if (divergence > divergenceThreshold) {
+    runtime.log(\`ALERT: LINK price divergence exceeds \${divergenceThreshold}% threshold!\`)
+    if (webhookUrl) {
+      const payload = JSON.stringify({
+        alert: "LINK Price Divergence Alert",
+        coingecko_price: cgPrice,
+        chainlink_feed_price: clPrice,
+        divergence_percent: divergence.toFixed(2),
+        threshold: divergenceThreshold,
+        network: "Base Sepolia",
+      })
+      const status = httpClient
+        .sendRequest(runtime, postAlert, consensusIdenticalAggregation<string>())(payload, webhookUrl)
+        .result()
+      runtime.log(\`Alert webhook: \${status}\`)
+    }
   }
 
-  return \`balance_usd=\${balanceUsd.toFixed(2)}\`
+  return \`link_divergence=\${divergence.toFixed(2)}\`
 }
 
 const initWorkflow = (config: Config) => {
@@ -178,15 +201,16 @@ import { z } from "zod"
 const configSchema = z.object({
   schedule: z.string(),
   coinGeckoApiKey: z.string(),
-  webhookUrl: z.string(),
-  minDominance: z.number(),
-  maxDominance: z.number(),
+  minDominance: z.number().default(40),
+  maxDominance: z.number().default(60),
+  webhookUrl: z.string().default(""),
 })
 type Config = z.infer<typeof configSchema>
 
 const fetchGlobalData = (sendRequester: HTTPSendRequester, url: string, apiKey: string): number => {
   const response = sendRequester.sendRequest({
     url,
+    method: "GET",
     headers: { "x-cg-pro-api-key": apiKey },
   }).result()
   if (!ok(response)) throw new Error(\`CoinGecko global failed: \${response.statusCode}\`)
@@ -216,7 +240,7 @@ const onCronTrigger = (runtime: Runtime<Config>): string => {
 
   runtime.log(\`BTC dominance: \${dominance.toFixed(2)}%\`)
 
-  if (dominance < minDominance || dominance > maxDominance) {
+  if ((dominance < minDominance || dominance > maxDominance) && webhookUrl) {
     const direction = dominance < minDominance ? "below minimum" : "above maximum"
     const payload = JSON.stringify({
       alert: \`BTC dominance \${direction}\`,
