@@ -2,28 +2,36 @@
 
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import { Play, Rocket, BookOpen, Loader2, Info } from "lucide-react"
+import { Play, Rocket, Loader2, Info, Bug, Database } from "lucide-react"
 
 interface ActionBarProps {
   hasCode: boolean
   simulating: boolean
   deploying: boolean
-  explaining: boolean
+  debugging: boolean
+  txPending?: boolean
+  showDebug: boolean
+  showLogOnChain: boolean
   onSimulate: () => void
   onDeploy: () => void
-  onExplain: () => void
+  onDebug: () => void
+  onLogOnChain: () => void
 }
 
 export function ActionBar({
   hasCode,
   simulating,
   deploying,
-  explaining,
+  debugging,
+  txPending,
+  showDebug,
+  showLogOnChain,
   onSimulate,
   onDeploy,
-  onExplain,
+  onDebug,
+  onLogOnChain,
 }: ActionBarProps) {
-  const busy = simulating || deploying || explaining
+  const busy = simulating || deploying || debugging
 
   return (
     <TooltipProvider>
@@ -68,20 +76,39 @@ export function ActionBar({
         </TooltipContent>
       </Tooltip>
 
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={onExplain}
-        disabled={!hasCode || busy}
-        className="border-zinc-700 text-zinc-400 hover:bg-zinc-800 hover:border-zinc-500"
-      >
-        {explaining ? (
-          <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
-        ) : (
-          <BookOpen className="w-3.5 h-3.5 mr-1.5" />
-        )}
-        Explain
-      </Button>
+      {showDebug && (
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={onDebug}
+          disabled={busy}
+          className="border-orange-700 text-orange-400 hover:bg-orange-900/30 hover:border-orange-500"
+        >
+          {debugging ? (
+            <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+          ) : (
+            <Bug className="w-3.5 h-3.5 mr-1.5" />
+          )}
+          Debug
+        </Button>
+      )}
+
+      {showLogOnChain && (
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={onLogOnChain}
+          disabled={txPending || busy}
+          className="border-purple-700 text-purple-400 hover:bg-purple-900/30 hover:border-purple-500"
+        >
+          {txPending ? (
+            <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+          ) : (
+            <Database className="w-3.5 h-3.5 mr-1.5" />
+          )}
+          Log to Chain
+        </Button>
+      )}
     </div>
     </TooltipProvider>
   )
