@@ -356,10 +356,11 @@ export async function fixWorkflow(code: string, improvement: string): Promise<st
 
 export async function chatWorkflow(
   code: string | undefined,
-  messages: { role: "user" | "assistant"; content: string }[]
+  messages: { role: "user" | "assistant"; content: string }[],
+  systemContentOverride?: string
 ): Promise<string> {
   const ai = getClient()
-  const systemContent = code
+  const systemContent = systemContentOverride ?? (code
     ? `You are an expert CRE (Chainlink Runtime Environment) code assistant.
 The user is working on this CRE TypeScript workflow:
 
@@ -368,7 +369,7 @@ ${code}
 \`\`\`
 
 Answer concisely. If asked to fix something, return the COMPLETE fixed TypeScript file wrapped in a \`\`\`typescript ... \`\`\` block so the frontend can detect and apply it automatically. Otherwise, reply in plain text.`
-    : `You are a friendly CRE workflow assistant. Help users understand what CRE (Chainlink Runtime Environment) workflows are, how they work, and how to write one. Keep answers concise and beginner-friendly.`
+    : `You are a friendly CRE workflow assistant. Help users understand what CRE (Chainlink Runtime Environment) workflows are, how they work, and how to write one. Keep answers concise and beginner-friendly.`)
 
   const resp = await ai.chat.completions.create({
     model: "glm-4.7",
@@ -378,6 +379,36 @@ Answer concisely. If asked to fix something, return the COMPLETE fixed TypeScrip
     ],
   })
   return resp.choices[0].message.content ?? ""
+}
+
+export async function agentClassify(
+  message: string,
+  hasCode: boolean,
+  hasMarketData: boolean
+): Promise<"chat" | "generate" | "simulate" | "analyze" | "autonomous"> {
+  const ai = getClient()
+  const resp = await ai.chat.completions.create({
+    model: "glm-4.7",
+    temperature: 0.1,
+    messages: [
+      {
+        role: "system",
+        content: `Classify the user message into exactly one of these intents:
+- generate: user wants to create/write/build a new CRE workflow
+- simulate: user wants to run/test/execute the workflow
+- analyze: user wants to score/review/check/assess the code quality
+- autonomous: user asks the agent to "watch", "monitor", "decide", "act automatically", or "keep an eye on" something without specifying a single action
+- chat: everything else (questions, explanations, general discussion)
+
+Context: hasCode=${hasCode}, hasMarketData=${hasMarketData}
+Return ONLY the single intent word with no punctuation or explanation.`,
+      },
+      { role: "user", content: message },
+    ],
+  })
+  const raw = resp.choices[0].message.content?.trim().toLowerCase() ?? "chat"
+  const valid = ["chat", "generate", "simulate", "analyze", "autonomous"]
+  return (valid.includes(raw) ? raw : "chat") as "chat" | "generate" | "simulate" | "analyze" | "autonomous"
 }
 
 export async function explainWorkflow(code: string): Promise<string> {
