@@ -5,15 +5,12 @@ import { Activity, RefreshCw } from "lucide-react"
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:3001"
 
-interface AssetData {
-  coingecko: number
-  chainlink: number
-  divergence: string
-}
-
 interface CREPayload {
-  eth: AssetData
-  link: AssetData
+  eth: number | null
+  btc: number | null
+  link: number | null
+  ethOnchain: number | null
+  generated: boolean
   network: string
 }
 
@@ -22,22 +19,9 @@ interface CREResponse {
   updatedAt: string | null
 }
 
-function AssetRow({ label, data }: { label: string; data: AssetData }) {
-  const div = parseFloat(data.divergence)
-  const divColor = div > 2 ? "text-red-400" : div > 0.5 ? "text-yellow-400" : "text-emerald-400"
-  return (
-    <div className="space-y-1">
-      <div className="text-xs font-semibold text-zinc-300 uppercase tracking-wide">{label}</div>
-      <div className="grid grid-cols-2 gap-x-3 text-xs">
-        <div className="text-zinc-500">CoinGecko</div>
-        <div className="text-zinc-200 font-mono">${data.coingecko.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
-        <div className="text-zinc-500">Chainlink</div>
-        <div className="text-zinc-200 font-mono">${data.chainlink.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
-        <div className="text-zinc-500">Divergence</div>
-        <div className={`font-mono font-semibold ${divColor}`}>{div.toFixed(4)}%</div>
-      </div>
-    </div>
-  )
+function fmt(n: number | null) {
+  if (n === null) return "—"
+  return "$" + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
 export function CreLiveFeed() {
@@ -71,6 +55,8 @@ export function CreLiveFeed() {
     return new Date(iso).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" })
   }
 
+  const d = state.data
+
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center gap-2 px-4 py-3 border-b border-zinc-800 shrink-0">
@@ -85,28 +71,45 @@ export function CreLiveFeed() {
             <RefreshCw className="w-3 h-3 animate-spin" />
             Connecting...
           </div>
-        ) : state.data === null ? (
+        ) : d === null ? (
           <div className="space-y-2">
             <div className="text-xs text-zinc-500 leading-relaxed">
               Waiting for CRE workflow...
             </div>
             <div className="text-[10px] text-zinc-700 leading-relaxed">
-              Run the simulator to populate this panel:
+              Run the simulator to populate this panel.
             </div>
-            <pre className="text-[10px] text-zinc-600 bg-zinc-900 rounded p-2 overflow-x-auto whitespace-pre-wrap">
-{`cd crett && cre workflow simulate \\
-  ./crett-workflow \\
-  -T staging-settings \\
-  --non-interactive \\
-  --trigger-index 0`}
-            </pre>
           </div>
         ) : (
-          <>
-            <AssetRow label="ETH / USD" data={state.data.eth} />
-            <div className="border-t border-zinc-800" />
-            <AssetRow label="LINK / USD" data={state.data.link} />
-          </>
+          <div className="space-y-3">
+            {d.generated && (
+              <div className="flex items-center gap-1.5 text-[10px] font-semibold text-emerald-400 bg-emerald-950/40 rounded px-2 py-1">
+                <span>✓</span>
+                <span>AI Generated Workflow</span>
+              </div>
+            )}
+            <div className="space-y-1">
+              <div className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wide">Prices (CoinGecko)</div>
+              <div className="grid grid-cols-2 gap-x-3 text-xs">
+                <div className="text-zinc-500">ETH / USD</div>
+                <div className="text-zinc-200 font-mono">{fmt(d.eth)}</div>
+                <div className="text-zinc-500">BTC / USD</div>
+                <div className="text-zinc-200 font-mono">{fmt(d.btc)}</div>
+                <div className="text-zinc-500">LINK / USD</div>
+                <div className="text-zinc-200 font-mono">{fmt(d.link)}</div>
+              </div>
+            </div>
+            {d.ethOnchain !== null && (
+              <div className="space-y-1">
+                <div className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wide">Chainlink Onchain</div>
+                <div className="grid grid-cols-2 gap-x-3 text-xs">
+                  <div className="text-zinc-500">ETH / USD</div>
+                  <div className="text-blue-300 font-mono">{fmt(d.ethOnchain)}</div>
+                </div>
+              </div>
+            )}
+            <div className="text-[10px] text-zinc-700">{d.network}</div>
+          </div>
         )}
       </div>
 
