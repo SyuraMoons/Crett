@@ -11,10 +11,8 @@ import { z } from "zod"
 const configSchema = z.object({
   schedule: z.string(),
   coinGeckoApiKey: z.string(),
-  ethUsdFeedAddress: z.string().default("0x4aDC67696bA383F43DD60A9e78F2C97Fbbfc7cb1"),
-  linkUsdFeedAddress: z.string().default("0xb113F5A928BCfF189C998ab20d753a47F9dE5A61"),
-  divergenceThreshold: z.number().default(1.0),
-  webhookUrl: z.string().default(""),
+  zaiApiKey: z.string().default(""),
+  ethFeedAddress: z.string().default("0x4aDC67696bA383F43DD60A9e78F2C97Fbbfc7cb1"),
 })
 type Config = z.infer<typeof configSchema>
 
@@ -22,85 +20,92 @@ const AGGREGATOR_V3_ABI = parseAbi([
   "function latestRoundData() external view returns (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound)"
 ])
 
-const fetchPrices = (sendRequester: HTTPSendRequester, url: string, apiKey: string): { ethereum: { usd: number }; chainlink: { usd: number } } => {
-  const response = sendRequester.sendRequest({
-    url, method: "GET",
-    headers: { "x-cg-pro-api-key": apiKey },
-  }).result()
-  if (!ok(response)) throw new Error(`CoinGecko request failed: ${response.statusCode}`)
-  return json(response) as { ethereum: { usd: number }; chainlink: { usd: number } }
+type MarketData = {
+  ethereum: { usd: number; usd_24h_change: number }
+  bitcoin:  { usd: number; usd_24h_change: number }
+  chainlink: { usd: number; usd_24h_change: number }
 }
 
-const postWebhook = (sendRequester: HTTPSendRequester, body: string, url: string): string => {
+const fetchMarketData = (sendRequester: HTTPSendRequester, url: string, apiKey: string): MarketData => {
+  const response = sendRequester.sendRequest({
+    url, method: "GET", headers: { "x-cg-pro-api-key": apiKey },
+  }).result()
+  if (!ok(response)) throw new Error(`CoinGecko failed: ${response.statusCode}`)
+  return json(response) as MarketData
+}
+
+const generateCREWorkflow = (sendRequester: HTTPSendRequester, prompt: string, apiKey: string): string => {
+  const body = JSON.stringify({
+    model: "glm-4.7",
+    messages: [
+      {
+        role: "system",
+        content: `You are an expert in the Chainlink Runtime Environment (CRE) TypeScript SDK.
+Generate a valid, deploy-ready CRE TypeScript workflow based on the market context provided.
+Use flat imports from @chainlink/cre-sdk (not namespaced). Use consensusMedianAggregation
+for numbers, consensusIdenticalAggregation for strings. Include CronCapability, Zod configSchema
+with only schedule + coinGeckoApiKey as required fields (all others use .default()), and the
+standard main() entry point. Return ONLY valid TypeScript — no markdown, no explanation.`
+      },
+      { role: "user", content: prompt }
+    ],
+    max_tokens: 800
+  })
   const encoded = Buffer.from(new TextEncoder().encode(body)).toString("base64")
   const response = sendRequester.sendRequest({
-    url, method: "POST",
-    headers: { "Content-Type": "application/json" },
+    url: "https://api.z.ai/api/coding/paas/v4/chat/completions",
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` },
     body: encoded,
   }).result()
-  return ok(response) ? "sent" : "failed"
-}
-
-function readFeedPrice(evmClient: EVMClient, runtime: Runtime<Config>, feedAddress: string): number {
-  const callData = encodeFunctionData({ abi: AGGREGATOR_V3_ABI, functionName: "latestRoundData", args: [] })
-  const result = evmClient.callContract(runtime, {
-    call: encodeCallMsg({ from: zeroAddress, to: feedAddress as Address, data: callData }),
-    blockNumber: LAST_FINALIZED_BLOCK_NUMBER,
-  }).result()
-  const [, answer] = decodeFunctionResult({
-    abi: AGGREGATOR_V3_ABI,
-    functionName: "latestRoundData",
-    data: bytesToHex(result.data),
-  }) as [bigint, bigint, bigint, bigint, bigint]
-  return Number(answer) / 1e8
+  if (!ok(response)) throw new Error(`LLM call failed: ${response.statusCode}`)
+  const data = json(response) as { choices: [{ message: { content: string } }] }
+  return data.choices[0].message.content
 }
 
 const onCronTrigger = (runtime: Runtime<Config>): string => {
-  const { coinGeckoApiKey, ethUsdFeedAddress, linkUsdFeedAddress, webhookUrl, divergenceThreshold } = runtime.config
+  const { coinGeckoApiKey, zaiApiKey, ethFeedAddress } = runtime.config
+  const httpClient = new HTTPClient()
   const network = getNetwork({ chainFamily: "evm", chainSelectorName: "ethereum-testnet-sepolia-base-1", isTestnet: true })
   const evmClient = new EVMClient(network.chainSelector.selector)
-  const httpClient = new HTTPClient()
 
-  runtime.log("Crett CRE Feed: fetching ETH + LINK prices...")
+  runtime.log("CRE Workflow Advisor: fetching market data...")
 
-  // 1. Fetch ETH + LINK prices from CoinGecko
-  const cgData = httpClient
-    .sendRequest(runtime, fetchPrices, consensusMedianAggregation<{ ethereum: { usd: number }; chainlink: { usd: number } }>())(
-      "https://pro-api.coingecko.com/api/v3/simple/price?ids=ethereum,chainlink&vs_currencies=usd",
+  // 1. CoinGecko — ETH, BTC, LINK prices
+  const market = httpClient
+    .sendRequest(runtime, fetchMarketData, consensusMedianAggregation<MarketData>())(
+      "https://pro-api.coingecko.com/api/v3/simple/price?ids=ethereum,bitcoin,chainlink&vs_currencies=usd&include_24hr_change=true",
       coinGeckoApiKey
     ).result()
 
-  const cgEth = cgData.ethereum.usd
-  const cgLink = cgData.chainlink.usd
-  runtime.log(`CoinGecko ETH: $${cgEth}`)
-  runtime.log(`CoinGecko LINK: $${cgLink}`)
+  runtime.log(`ETH: $${market.ethereum.usd} (${market.ethereum.usd_24h_change.toFixed(2)}% 24h)`)
+  runtime.log(`BTC: $${market.bitcoin.usd} (${market.bitcoin.usd_24h_change.toFixed(2)}% 24h)`)
+  runtime.log(`LINK: $${market.chainlink.usd} (${market.chainlink.usd_24h_change.toFixed(2)}% 24h)`)
 
-  // 2. Fetch from Chainlink on-chain feeds (Base Sepolia)
-  const clEth = readFeedPrice(evmClient, runtime, ethUsdFeedAddress)
-  const clLink = readFeedPrice(evmClient, runtime, linkUsdFeedAddress)
-  runtime.log(`Chainlink ETH: $${clEth}`)
-  runtime.log(`Chainlink LINK: $${clLink}`)
+  // 2. Chainlink feed — onchain ETH/USD confirmation
+  const callData = encodeFunctionData({ abi: AGGREGATOR_V3_ABI, functionName: "latestRoundData", args: [] })
+  const result = evmClient.callContract(runtime, {
+    call: encodeCallMsg({ from: zeroAddress, to: ethFeedAddress as Address, data: callData }),
+    blockNumber: LAST_FINALIZED_BLOCK_NUMBER,
+  }).result()
+  const [, answer] = decodeFunctionResult({
+    abi: AGGREGATOR_V3_ABI, functionName: "latestRoundData", data: bytesToHex(result.data)
+  }) as [bigint, bigint, bigint, bigint, bigint]
+  const ethOnchain = Number(answer) / 1e8
+  runtime.log(`Chainlink ETH/USD (Base Sepolia): $${ethOnchain}`)
 
-  // 3. Compute divergence
-  const ethDivergence = Math.abs((cgEth - clEth) / clEth) * 100
-  const linkDivergence = Math.abs((cgLink - clLink) / clLink) * 100
-  runtime.log(`ETH Divergence: ${ethDivergence.toFixed(4)}%`)
-  runtime.log(`LINK Divergence: ${linkDivergence.toFixed(4)}%`)
-
-  // 4. Send webhook unconditionally (reports live data every run)
-  if (webhookUrl) {
-    const payload = JSON.stringify({
-      eth: { coingecko: cgEth, chainlink: clEth, divergence: ethDivergence.toFixed(4) },
-      link: { coingecko: cgLink, chainlink: clLink, divergence: linkDivergence.toFixed(4) },
-      alert: ethDivergence > divergenceThreshold || linkDivergence > divergenceThreshold,
-    })
-    const status = httpClient
-      .sendRequest(runtime, postWebhook, consensusIdenticalAggregation<string>())(payload, webhookUrl)
+  // 3. Generate a CRE workflow tailored to current conditions
+  if (zaiApiKey) {
+    runtime.log("Generating CRE workflow from current market conditions...")
+    const prompt = `Market context: ETH $${market.ethereum.usd} (${market.ethereum.usd_24h_change.toFixed(1)}% 24h), BTC $${market.bitcoin.usd} (${market.bitcoin.usd_24h_change.toFixed(1)}% 24h), LINK $${market.chainlink.usd} (${market.chainlink.usd_24h_change.toFixed(1)}% 24h). Chainlink onchain ETH: $${ethOnchain}. Generate a complete CRE TypeScript workflow that monitors the most actionable condition right now based on this market data.`
+    const generatedCode = httpClient
+      .sendRequest(runtime, generateCREWorkflow, consensusIdenticalAggregation<string>())(prompt, zaiApiKey)
       .result()
-    runtime.log(`Webhook: ${status}`)
+    runtime.log(`Generated CRE Workflow (preview):\n${generatedCode.slice(0, 500)}...`)
+    return `generated_ok,eth=${market.ethereum.usd}`
   }
 
-  return `eth=${cgEth},link=${cgLink}`
+  return `advisor_run=ok,eth=${market.ethereum.usd},btc=${market.bitcoin.usd},link=${market.chainlink.usd}`
 }
 
 const initWorkflow = (config: Config) => {
