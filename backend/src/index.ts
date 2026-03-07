@@ -11,6 +11,7 @@ import analyzeRoute from "./routes/analyze"
 import creDataRoute from "./routes/cre-data"
 import fixRoute from "./routes/fix"
 import chatRoute from "./routes/chat"
+import agentRoute from "./routes/agent"
 
 dotenv.config()
 
@@ -28,6 +29,7 @@ app.use("/analyze", analyzeRoute)
 app.use("/api/cre-data", creDataRoute)
 app.use("/fix", fixRoute)
 app.use("/chat", chatRoute)
+app.use("/agent", agentRoute)
 
 app.get("/health", (_, res) => res.json({ status: "ok" }))
 

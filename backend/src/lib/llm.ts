@@ -382,8 +382,10 @@ export async function chatWorkflow(
     ? `\n\n## Relevant CRE Documentation\n${ragContext}\n`
     : ""
 
-  const systemContent = code
-    ? `You are an expert CRE (Chainlink Runtime Environment) code assistant.
+  const systemContent = systemContentOverride
+    ? systemContentOverride + ragSection
+    : code
+      ? `You are an expert CRE (Chainlink Runtime Environment) code assistant.
 The user is working on this CRE TypeScript workflow:
 
 \`\`\`typescript
@@ -391,7 +393,7 @@ ${code}
 \`\`\`
 
 Answer concisely. If asked to fix something, return the COMPLETE fixed TypeScript file wrapped in a \`\`\`typescript ... \`\`\` block so the frontend can detect and apply it automatically. Otherwise, reply in plain text.${ragSection}`
-    : `You are a friendly CRE workflow assistant. Help users understand what CRE (Chainlink Runtime Environment) workflows are, how they work, and how to write one. Keep answers concise and beginner-friendly.${ragSection}`
+      : `You are a friendly CRE workflow assistant. Help users understand what CRE (Chainlink Runtime Environment) workflows are, how they work, and how to write one. Keep answers concise and beginner-friendly.${ragSection}`
 
   const resp = await ai.chat.completions.create({
     model: "glm-4.7",

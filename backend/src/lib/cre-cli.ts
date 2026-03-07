@@ -103,6 +103,7 @@ export async function* simulateWorkflow(opts: SimulateOptions): AsyncGenerator<s
   const enrichedConfig = {
     schedule: "*/30 * * * * *",
     coinGeckoApiKey: process.env.COINGECKO_API_KEY ?? "",
+    zaiApiKey: process.env.ZAI_API_KEY ?? "",
     ...opts.config,
   }
   await writeFile(join(CRE_WORKFLOW_DIR, "main.ts"), opts.code, "utf-8")
@@ -142,10 +143,19 @@ async function* mockSimulate(): AsyncGenerator<string> {
     "[cre] Trigger type: cron (*/30 * * * * *)\n",
     "[cre] ─────────────────────────────────────────\n",
     "[cre] Simulating trigger #0 execution...\n",
-    "[cre] Fetching market data via Chainlink Data Feeds...\n",
-    "[cre] Price consensus reached: ETH/USD $1,985.89 (+1.04%)\n",
-    "[cre] Condition evaluation: active\n",
-    "[cre] Workflow actions executed successfully\n",
+    "[cre] CRE Workflow Advisor: fetching market data...\n",
+    "ETH: $2,845.32 (+1.24% 24h)\n",
+    "BTC: $42,180.00 (-0.89% 24h)\n",
+    "LINK: $18.92 (+2.31% 24h)\n",
+    "Chainlink ETH/USD (Base Sepolia): $2,843.18\n",
+    "[cre] Generating CRE workflow from current market conditions...\n",
+    "[cre] Generated CRE Workflow (preview):\n",
+    "[cre] import { CronCapability, HTTPClient, handler, Runner, consensusMedianAggregation,\n",
+    "[cre]   ok, json, type Runtime } from \"@chainlink/cre-sdk\"\n",
+    "[cre] import { z } from \"zod\"\n",
+    "[cre] const configSchema = z.object({ schedule: z.string(), coinGeckoApiKey: z.string(),\n",
+    "[cre]   linkAlertThreshold: z.number().default(20) })\n",
+    "[cre] ...\n",
     "[cre] ─────────────────────────────────────────\n",
     "[cre] Simulation complete ✓\n",
   ]
@@ -164,6 +174,7 @@ export async function* deployWorkflow(opts: SimulateOptions): AsyncGenerator<str
   const enrichedConfig = {
     schedule: "*/30 * * * * *",
     coinGeckoApiKey: process.env.COINGECKO_API_KEY ?? "",
+    zaiApiKey: process.env.ZAI_API_KEY ?? "",
     ...opts.config,
   }
   await writeFile(join(CRE_WORKFLOW_DIR, "main.ts"), opts.code, "utf-8")
