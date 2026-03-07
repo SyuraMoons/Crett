@@ -2,6 +2,7 @@ import OpenAI from "openai"
 import { ETH_PRICE_ALERT_TEMPLATE, CHAINLINK_FEED_MONITOR_TEMPLATE, MARKET_DOMINANCE_TEMPLATE } from "./cre-templates"
 import { buildChainlinkContext } from "./chainlink-context"
 import { WorkflowAnalysisSchema, type WorkflowAnalysis } from "./analysis-schema"
+import { queryRAG } from "./rag"
 
 export function buildSystemPrompt(): string {
   return `You are an expert in the Chainlink Runtime Environment (CRE) TypeScript SDK. Your job is to generate syntactically valid, deploy-ready CRE TypeScript workflow files based on user descriptions.
@@ -168,10 +169,14 @@ function getClient(): OpenAI {
 
 export async function generateWorkflow(userPrompt: string): Promise<string> {
   const ai = getClient()
+  const ragContext = await queryRAG(userPrompt)
+  const ragSection = ragContext
+    ? `\n\n## Relevant CRE Documentation\n${ragContext}\n`
+    : ""
   const resp = await ai.chat.completions.create({
     model: "glm-4.7",
     messages: [
-      { role: "system", content: buildSystemPrompt() },
+      { role: "system", content: buildSystemPrompt() + ragSection },
       {
         role: "user",
         content: `Generate a NEW, UNIQUE CRE TypeScript workflow that specifically implements: ${userPrompt}
@@ -197,10 +202,21 @@ export async function* generateWorkflowStream(
   userPrompt: string
 ): AsyncGenerator<string> {
   const ai = getClient()
+
+  // Race RAG against a 1.5s timeout — inject if fast enough, skip if not
+  const ragContext = await Promise.race([
+    queryRAG(userPrompt),
+    new Promise<string>((resolve) => setTimeout(() => resolve(""), 1500)),
+  ])
+
+  const ragSection = ragContext
+    ? `\n\n## Relevant CRE Documentation\n${ragContext}\n`
+    : ""
+
   const stream = await ai.chat.completions.create({
     model: "glm-4.7",
     messages: [
-      { role: "system", content: buildSystemPrompt() },
+      { role: "system", content: buildSystemPrompt() + ragSection },
       {
         role: "user",
         content: `Generate a NEW, UNIQUE CRE TypeScript workflow that specifically implements: ${userPrompt}
@@ -360,7 +376,13 @@ export async function chatWorkflow(
   systemContentOverride?: string
 ): Promise<string> {
   const ai = getClient()
-  const systemContent = systemContentOverride ?? (code
+  const lastUserMessage = messages.filter((m) => m.role === "user").at(-1)?.content ?? ""
+  const ragContext = await queryRAG(lastUserMessage)
+  const ragSection = ragContext
+    ? `\n\n## Relevant CRE Documentation\n${ragContext}\n`
+    : ""
+
+  const systemContent = code
     ? `You are an expert CRE (Chainlink Runtime Environment) code assistant.
 The user is working on this CRE TypeScript workflow:
 
@@ -368,8 +390,8 @@ The user is working on this CRE TypeScript workflow:
 ${code}
 \`\`\`
 
-Answer concisely. If asked to fix something, return the COMPLETE fixed TypeScript file wrapped in a \`\`\`typescript ... \`\`\` block so the frontend can detect and apply it automatically. Otherwise, reply in plain text.`
-    : `You are a friendly CRE workflow assistant. Help users understand what CRE (Chainlink Runtime Environment) workflows are, how they work, and how to write one. Keep answers concise and beginner-friendly.`)
+Answer concisely. If asked to fix something, return the COMPLETE fixed TypeScript file wrapped in a \`\`\`typescript ... \`\`\` block so the frontend can detect and apply it automatically. Otherwise, reply in plain text.${ragSection}`
+    : `You are a friendly CRE workflow assistant. Help users understand what CRE (Chainlink Runtime Environment) workflows are, how they work, and how to write one. Keep answers concise and beginner-friendly.${ragSection}`
 
   const resp = await ai.chat.completions.create({
     model: "glm-4.7",
