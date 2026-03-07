@@ -4,6 +4,10 @@ const router = Router()
 
 let latest: { data: unknown; updatedAt: string } | null = null
 
+export function getLatestCreData() {
+  return latest
+}
+
 router.post("/", (req, res) => {
   latest = { data: req.body, updatedAt: new Date().toISOString() }
   res.json({ ok: true })
