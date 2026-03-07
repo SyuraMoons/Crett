@@ -2,20 +2,17 @@
 
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import { Play, Rocket, Loader2, Info, Bug, Database } from "lucide-react"
+import { Play, Rocket, Loader2, Info, Bug } from "lucide-react"
 
 interface ActionBarProps {
   hasCode: boolean
   simulating: boolean
   deploying: boolean
   debugging: boolean
-  txPending?: boolean
-  showDebug: boolean
-  showLogOnChain: boolean
+  canDebug: boolean
   onSimulate: () => void
   onDeploy: () => void
   onDebug: () => void
-  onLogOnChain: () => void
 }
 
 export function ActionBar({
@@ -23,13 +20,10 @@ export function ActionBar({
   simulating,
   deploying,
   debugging,
-  txPending,
-  showDebug,
-  showLogOnChain,
+  canDebug,
   onSimulate,
   onDeploy,
   onDebug,
-  onLogOnChain,
 }: ActionBarProps) {
   const busy = simulating || deploying || debugging
 
@@ -76,13 +70,16 @@ export function ActionBar({
         </TooltipContent>
       </Tooltip>
 
-      {showDebug && (
+      {hasCode && (
         <Button
           variant="outline"
           size="sm"
           onClick={onDebug}
-          disabled={busy}
-          className="border-orange-700 text-orange-400 hover:bg-orange-900/30 hover:border-orange-500"
+          disabled={!canDebug || busy}
+          title={canDebug ? undefined : "Run simulation first to enable debug"}
+          className={canDebug
+            ? "border-orange-700 text-orange-400 hover:bg-orange-900/30 hover:border-orange-500"
+            : "border-zinc-700 text-zinc-600 cursor-default"}
         >
           {debugging ? (
             <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
@@ -90,23 +87,6 @@ export function ActionBar({
             <Bug className="w-3.5 h-3.5 mr-1.5" />
           )}
           Debug
-        </Button>
-      )}
-
-      {showLogOnChain && (
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={onLogOnChain}
-          disabled={txPending || busy}
-          className="border-purple-700 text-purple-400 hover:bg-purple-900/30 hover:border-purple-500"
-        >
-          {txPending ? (
-            <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
-          ) : (
-            <Database className="w-3.5 h-3.5 mr-1.5" />
-          )}
-          Log to Chain
         </Button>
       )}
     </div>
