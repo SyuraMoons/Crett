@@ -1,19 +1,27 @@
 "use client"
 
 import { useState } from "react"
-import { X, CheckCircle, AlertTriangle, Loader2, Send, Sparkles, Bot, RotateCcw } from "lucide-react"
+import { X, CheckCircle, AlertTriangle, Loader2, Send, Sparkles, Bot, RotateCcw, Trash2 } from "lucide-react"
 import type { WorkflowAnalysis, RiskFlag } from "@/lib/analysis-types"
 
-type ChatMessage = { role: "user" | "assistant"; content: string }
+type Intent = "chat" | "generate" | "simulate" | "analyze" | "autonomous"
+
+type AgentMessage = {
+  role: "user" | "assistant"
+  content: string
+  intent?: Intent
+  autoTriggered?: boolean
+}
 
 interface AgentPanelProps {
   hasCode: boolean
   analysis: WorkflowAnalysis | null
   analyzing: boolean
   onAnalyze: () => void
-  chatMessages: ChatMessage[]
+  chatMessages: AgentMessage[]
   chatLoading: boolean
   onChat: (message: string) => void
+  onClearHistory: () => void
   onClose: () => void
 }
 
@@ -55,6 +63,14 @@ const subScoreEntries = [
   { label: "Runtime Safety", key: "runtime_safety" as const },
 ]
 
+const intentBadge: Record<Intent, { label: string; className: string } | null> = {
+  chat: null,
+  generate: { label: "⚡ Generated", className: "bg-blue-900/40 text-blue-300 border border-blue-700" },
+  simulate: { label: "▶ Simulated", className: "bg-purple-900/40 text-purple-300 border border-purple-700" },
+  analyze: { label: "🔍 Analyzed", className: "bg-yellow-900/40 text-yellow-300 border border-yellow-700" },
+  autonomous: { label: "🤖 Autonomous", className: "bg-green-900/40 text-green-300 border border-green-700" },
+}
+
 function ChatInput({ onSend, disabled }: { onSend: (msg: string) => void; disabled: boolean }) {
   const [value, setValue] = useState("")
   const send = () => {
@@ -92,6 +108,7 @@ export function AgentPanel({
   chatMessages,
   chatLoading,
   onChat,
+  onClearHistory,
   onClose,
 }: AgentPanelProps) {
   return (
@@ -234,29 +251,53 @@ export function AgentPanel({
 
         {/* Chat section — always visible, fills remaining space */}
         <div className="flex-1 flex flex-col min-h-0 px-3 py-3 gap-2">
-          <div className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider shrink-0">Chat</div>
+          <div className="flex items-center justify-between shrink-0">
+            <div className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">Chat</div>
+            {chatMessages.length > 0 && (
+              <button
+                onClick={onClearHistory}
+                className="flex items-center gap-1 text-[10px] text-zinc-600 hover:text-zinc-400 transition-colors"
+                title="Clear history"
+              >
+                <Trash2 className="w-3 h-3" />
+                Clear
+              </button>
+            )}
+          </div>
 
           {/* Message list */}
           <div className="flex-1 overflow-y-auto space-y-2 pr-0.5">
             {chatMessages.length === 0 ? (
               <p className="text-xs text-zinc-600 leading-relaxed mt-1">
-                Hi! Ask me anything about CRE workflows — or click Analyze to review your code.
+                Hi! Ask me anything about CRE workflows, or say "generate a workflow that monitors LINK price" to get started.
               </p>
             ) : (
-              chatMessages.map((msg, i) => (
-                <div
-                  key={i}
-                  className={`text-xs rounded-lg px-2.5 py-1.5 leading-relaxed whitespace-pre-wrap ${
-                    msg.role === "user"
-                      ? "bg-blue-900/30 text-blue-200 ml-4"
-                      : "bg-zinc-800 text-zinc-300 mr-4"
-                  }`}
-                >
-                  {msg.content.includes("```")
-                    ? msg.content.replace(/```[\s\S]*?```/g, "[code applied to editor]")
-                    : msg.content}
-                </div>
-              ))
+              chatMessages.map((msg, i) => {
+                const badge = msg.role === "assistant" && msg.intent ? intentBadge[msg.intent] : null
+                return (
+                  <div key={i} className="space-y-1">
+                    {badge && (
+                      <span className={`inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded ${badge.className}`}>
+                        {badge.label}
+                      </span>
+                    )}
+                    <div
+                      className={`text-xs rounded-lg px-2.5 py-1.5 leading-relaxed whitespace-pre-wrap ${
+                        msg.role === "user"
+                          ? "bg-blue-900/30 text-blue-200 ml-4"
+                          : "bg-zinc-800 text-zinc-300 mr-4"
+                      }`}
+                    >
+                      {msg.content.includes("```")
+                        ? msg.content.replace(/```[\s\S]*?```/g, "[code applied to editor]")
+                        : msg.content}
+                    </div>
+                    {msg.autoTriggered && (
+                      <div className="text-[10px] text-zinc-600 ml-1">↳ auto-triggered action</div>
+                    )}
+                  </div>
+                )
+              })
             )}
             {chatLoading && (
               <div className="flex items-center gap-1.5 text-zinc-500 text-xs">
