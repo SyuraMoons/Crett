@@ -2,6 +2,9 @@
 
 Hackathon project for Chainlink Convergence 2026.
 
+Demo link: https://crett-one.vercel.app/
+Demo video: https://youtu.be/5-DggHPrFTY 
+
 ## Project Structure
 
 ```
